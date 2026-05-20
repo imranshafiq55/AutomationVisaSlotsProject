@@ -14,7 +14,36 @@ class UsVisaScheduling:
     month_numbers = ""
     dates_filter_list = []
     city_dropdown_wait_time = 5
+    # Retry Logic 
+    def retry(self, func, retries=3, delay=2, *args, **kwargs):
+        last_exception = None
 
+        for attempt in range(retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_exception = e
+                print(f"[Retry {attempt+1}/{retries}] Failed: {str(e)}")
+                time.sleep(delay)
+
+        print("All retries failed.")
+        raise last_exception
+    
+    def safe_switch_window(self, driver, prefer_index=0):
+        try:
+            handles = driver.window_handles
+            print("Available window handles:", handles)
+            if len(handles) > prefer_index:
+                driver.switch_to.window(handles[prefer_index])
+                print(f"Switched to tab index {prefer_index}")
+            else:
+                driver.switch_to.window(handles[0])
+                print("Only one tab exists, staying in main tab")
+            print(driver.current_url)
+        except Exception as expt:
+            print("switching window handles Exception : " + str(expt))
+            raise expt
+    
     def ofc_post(self):
         print("0: CHENNAI VAC")
         print("1: HYDERABAD VAC")
@@ -98,12 +127,12 @@ class UsVisaScheduling:
             pause_duration_end_time = float(input("Please Enter End Time of pause duration like 120.9: "))
             pause_duration = random.uniform(pause_duration_start_time, pause_duration_end_time)  # Pause for 30 seconds
 
-            chrome_ver = int(input("Please Enter Version of your Chrome like 145: "))
+            
 
             # Define the URL
             url = "https://www.usvisascheduling.com/"
-
-            proxy = input("Please Enter Proxy Like: 5.59.250.12:6710: ")
+            #url = "https://www.usvisascheduling.com/en-US/ofc-schedule/"
+            #5proxy = input("Please Enter Proxy Like: 5.59.250.12:6710: ")
 
             # def get_random_proxy():
             #     return random.choice(proxies)
@@ -113,12 +142,12 @@ class UsVisaScheduling:
             # options = Options()
             # proxy = get_random_proxy()
             # print("Current Proxy: " + str(proxy))
-            options = self.getChromeOptions(options, proxy)
-
+            # 5 use this line....options = self.getChromeOptions(options, proxy)
+            options = self.getChromeOptions(options, "")
             # Initialize Chrome WebDriver with options
             # driver = uc.Chrome(options=options, version_main=144)
-            driver = uc.Chrome(options=options, version_main=chrome_ver)
-
+            #driver = uc.Chrome(options=options)
+            driver = uc.Chrome(options=options, version_main=148)
             # driver = uc.Chrome(service=Service(), options=options)
             # Navigate to the website using WebDriver
             driver.get(url)
@@ -127,17 +156,20 @@ class UsVisaScheduling:
 
             navigate_to_ofc = input("Please Hit Enter After Navigating to the OFC POST: ")
             try:
-                # Switch to the newly opened tab
-                driver.switch_to.window(driver.window_handles[1])
-                print(driver.current_url)
-                driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
+                self.safe_switch_window(driver, prefer_index=1)
+                driver.execute_script("window.alert = function() {};")
+
             except Exception as expt:
-                # print("Exception Occurred while switching window handles: " + str(expt))
                 print("switching window handles Exception : " + str(expt))
                 return
 
             slot_not_found = True
             group_members_path = "//h2[text()='Group Members']"
+            
+            #waiting room logic
+            waiting_room_path = "//div[@id='image-section']"
+            print("Waiting room XPath set: " + waiting_room_path)
+
             ofc_post_city_select_dropdown_path = "//select[@id='post_select']"
             ofc_post_city_calendar_date_picker = '//div[contains(@class,"hasDatepicker")]'
             ofc_post_city_calendar_date_picker_year = "//select[@class='ui-datepicker-year']"
@@ -145,13 +177,33 @@ class UsVisaScheduling:
 
             start_time = time.time()
             counter = 1
+            print("Slot finding start")
             while slot_not_found:
+                print("Loop in")
                 for post_city in self.ofc_post_city_list:
                     print("Counter: " + str(counter))
+
+                    # ✅ FIX 3: Detect waiting room and wait it out
+                    if self.isElementPresent(driver, waiting_room_path):
+                        print("⏳ Waiting Room Detected. Waiting for it to clear...")
+                        wait_counter = 0
+                        while self.isElementPresent(driver, waiting_room_path):
+                            wait_counter += 1
+                            print(f"Still in waiting room... ({wait_counter * 10} seconds elapsed)")
+                            time.sleep(10)
+                            if wait_counter > 60:  # max wait 10 minutes
+                                print("Waited too long. Refreshing page...")
+                                driver.refresh()
+                                time.sleep(5)
+                                break
+                        print("✅ Waiting Room Cleared! Resuming bot...")
+                        time.sleep(3)  # small buffer after waiting room clears
+
                     current_time = time.time()
                     elapsed_time = current_time - start_time
                     if elapsed_time >= bot_run_interval:
                         self.select_dropdown(driver, ofc_post_city_select_dropdown_path, "")
+                        #self.retry(self.select_dropdown, 3, 2, driver, ofc_post_city_select_dropdown_path, post_city)
                         # self.clear_browser_cache(driver)
                         print("Pausing for '" + str(pause_duration) + "' Seconds after every '" + str(bot_run_interval_start_time) + "' to '" + str(bot_run_interval_end_time) + "' Minutes...")
                         time.sleep(pause_duration)  # Pause the bot for in between 15 seconds to 45 seconds
@@ -173,7 +225,9 @@ class UsVisaScheduling:
                                 time.sleep(random.uniform(0.2, 0.7))  # Wait between 1 and 3 seconds
                                 # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
 
-                            self.select_dropdown(driver, ofc_post_city_select_dropdown_path, post_city)
+                            #self.select_dropdown(driver, ofc_post_city_select_dropdown_path, post_city)
+                            #retry logic implemented
+                            self.retry(self.select_dropdown, 3, 2, driver, ofc_post_city_select_dropdown_path, post_city)
                             # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
                             no_slots_avail_path = "//div[not(contains(@style,'none'))]/div[text()='No Slots Available']"
                             # time.sleep(random.uniform(0.1, 0.3))  # Wait between 1 and 3 seconds
@@ -184,8 +238,8 @@ class UsVisaScheduling:
                                 print("Date Input Not Loaded or Found So Maybe OFC Page Navigated to any other page or Something Went Wrong.")
                                 try:
                                     # Switch to the newly opened tab
-                                    driver.switch_to.window(driver.window_handles[0])
-                                    print(driver.current_url)
+                                    self.safe_switch_window(driver, prefer_index=0)
+                                    
                                 except Exception as expt:
                                     # print("Exception Occurred while switching window handles: " + str(expt))
                                     print("switching window handles Exception : " + str(expt))
@@ -194,8 +248,7 @@ class UsVisaScheduling:
                                 check_for_web = input("It seems like OFC Page is Naviagted to any other page, please navigate it to OFC Page & Hit Enter to Continue the Program: ")
                                 try:
                                     # Switch to the newly opened tab
-                                    driver.switch_to.window(driver.window_handles[1])
-                                    print(driver.current_url)
+                                    self.safe_switch_window(driver, prefer_index=1)
 
                                     # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
 
@@ -232,7 +285,7 @@ class UsVisaScheduling:
                         print("Group Members Label is not present")
                         try:
                             # Switch to the newly opened tab
-                            driver.switch_to.window(driver.window_handles[0])
+                            self.safe_switch_window(driver, prefer_index=0)
                             print(driver.current_url)
                         except Exception as expt:
                             # print("Exception Occurred while switching window handles: " + str(expt))
@@ -242,7 +295,7 @@ class UsVisaScheduling:
                         check_for_group_members_label = input("It seems like OFC Page is Naviagted to any other page, please navigate it to OFC Page & Hit Enter to Continue the Program: ")
                         try:
                             # Switch to the newly opened tab
-                            driver.switch_to.window(driver.window_handles[1])
+                            self.safe_switch_window(driver, prefer_index=1)
                             print(driver.current_url)
 
                             # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
@@ -362,7 +415,13 @@ class UsVisaScheduling:
         chrome_options.add_argument('--disable-popup-blocking')
         # For Disabling Notification
         chrome_options.add_argument('--disable-notifications')
-
+        # For Saving Login Session. Remove this when handling this to client
+        chrome_options.add_argument(r"--user-data-dir=F:\chrome_profile")
+        #chrome_options.add_argument(r"--user-data-dir=./chrome_profile")
+        #chrome_options.add_argument(r"--user-data-dir=./visa_profile")
+        
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--start-maximized")
         # Below statements comment due to circumstances that slots aren't booking verified by me also.
         # prefs = {
         #     "profile.default_content_setting_values.notifications": 2,  # Disable notifications
@@ -395,10 +454,10 @@ class UsVisaScheduling:
         # Set Chrome WebDriver options to disable images
         # prefs = {"profile.managed_default_content_settings.images": 2}
         # options.add_experimental_option("prefs", prefs)
-
-        if proxy != "":
-            chrome_options.add_argument(f'--proxy-server=http://{proxy}')
-
+        
+        #5if proxy != "":
+          #  chrome_options.add_argument(f'--proxy-server=http://{proxy}')
+       
         return chrome_options
 
     def getElementAttributeText(self, driver, locator, attributeName, locaType=By.XPATH, returnBlankStr=True):
@@ -536,7 +595,7 @@ class UsVisaScheduling:
                                     # time.sleep(random.uniform(0.2, 0.3))  # Wait between 1 and 3 seconds
                                     # self.ClickElementWithJS(driver, submit_btn_not_disabled_path)
                                     # time.sleep(random.uniform(0.3, 0.5))  # Wait between 1 and 3 seconds
-                                    self.ClickElementWithJS(driver, submit_btn_not_disabled_path)
+                                    # this is click submit button. self.ClickElementWithJS(driver, submit_btn_not_disabled_path)
                                     # time.sleep(random.uniform(0.3, 0.5))  # Wait between 1 and 3 seconds
                                     # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
 
