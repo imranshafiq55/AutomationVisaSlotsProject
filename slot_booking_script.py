@@ -44,6 +44,49 @@ class UsVisaScheduling:
             print("switching window handles Exception : " + str(expt))
             raise expt
     
+    def wait_for_page_ready(self, driver, group_members_path):
+        max_attempts = 60
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
+            current_title = driver.title.lower()
+            current_url = driver.current_url.lower()
+
+            # ✅ OFC Page is ready
+            if self.isElementPresent(driver, group_members_path):
+                print("✅ OFC Page Ready!")
+                return True
+
+            # 🕐 State 1: Waiting Queue — detected by URL or image-section
+            elif "ofc-schedule" not in current_url or \
+                self.isElementPresent(driver, "//div[@id='image-section']"):
+                print(f"⏳ [QUEUE] Waiting room active... URL: {driver.current_url} ({attempt * 10}s elapsed)")
+                time.sleep(10)
+
+            # 🤖 State 2: Cloudflare Human Verification
+            elif "just a moment" in current_title or \
+                "verifying" in current_title or \
+                self.isElementPresent(driver, "//div[contains(text(),'Verifying you are human')]"):
+                print(f"🤖 [CLOUDFLARE] Verifying human... ({attempt * 10}s elapsed)")
+                time.sleep(10)
+
+            # ❌ State 3: Cloudflare 524 Timeout
+            elif "524" in current_title or \
+                self.isElementPresent(driver, "//*[contains(text(),'timeout occurred')]"):
+                print(f"❌ [524 ERROR] Timeout error, waiting to retry... ({attempt * 10}s elapsed)")
+                time.sleep(15)
+                print("🔄 Refreshing page after 524...")
+                driver.refresh()
+                time.sleep(5)
+
+            # ❓ Unknown state
+            else:
+                print(f"⚠️ [UNKNOWN] Page not ready... Title: {driver.title} URL: {driver.current_url} ({attempt * 10}s elapsed)")
+                time.sleep(10)
+
+        print("❌ Gave up waiting for page to be ready.")
+        return False
+    
     def ofc_post(self):
         print("0: CHENNAI VAC")
         print("1: HYDERABAD VAC")
@@ -106,10 +149,10 @@ class UsVisaScheduling:
     def us_visa_sch_nav(self):
         try:
 
-            inner_start_time = float(input("Please Enter Start Time of wait between Every Loop like: 1.1"))
-            inner_end_time = float(input("Please Enter End Time of wait between Every Loop like: 10.9"))
-            outer_start_time = float(input("Please Enter Start Time of wait After Every Loop like: 1.1"))
-            outer_end_time = float(input("Please Enter End Time of wait After Every Loop like: 12.9"))
+            inner_start_time = float(input("Please Enter Start Time of wait between Every Loop like: 1.1 "))
+            inner_end_time = float(input("Please Enter End Time of wait between Every Loop like: 10.9 "))
+            outer_start_time = float(input("Please Enter Start Time of wait After Every Loop like: 1.1 "))
+            outer_end_time = float(input("Please Enter End Time of wait After Every Loop like: 12.9 "))
 
             # pause_duration = random.uniform(15.1, 45.9)  # Pause for 30 seconds
             # pause_duration = random.uniform(15.1, 120.9)  # Pause for 30 seconds
@@ -132,7 +175,7 @@ class UsVisaScheduling:
             # Define the URL
             url = "https://www.usvisascheduling.com/"
             #url = "https://www.usvisascheduling.com/en-US/ofc-schedule/"
-            #5proxy = input("Please Enter Proxy Like: 5.59.250.12:6710: ")
+            #55proxy = input("Please Enter Proxy Like: 5.59.250.12:6710: ")
 
             # def get_random_proxy():
             #     return random.choice(proxies)
@@ -142,7 +185,7 @@ class UsVisaScheduling:
             # options = Options()
             # proxy = get_random_proxy()
             # print("Current Proxy: " + str(proxy))
-            # 5 use this line....options = self.getChromeOptions(options, proxy)
+            # 55 use this line....options = self.getChromeOptions(options, proxy)
             options = self.getChromeOptions(options, "")
             # Initialize Chrome WebDriver with options
             # driver = uc.Chrome(options=options, version_main=144)
@@ -214,48 +257,29 @@ class UsVisaScheduling:
                         pause_duration = random.uniform(pause_duration_start_time, pause_duration_end_time)  # Pause for 30 seconds
                         start_time = time.time()  # Reset the start time
 
-                    if self.isElementPresent(driver, group_members_path):
+                    # ✅ Wait for page to be ready (handles queue, cloudflare, 524 automatically)
+                    page_ready = self.wait_for_page_ready(driver, group_members_path)
+
+                    if page_ready:
                         if self.isElementPresent(driver, ofc_post_city_select_dropdown_path):
 
-                            # waiting here just to take extra time for empty city to avoid popups
                             if len(self.ofc_post_city_list) == 1:
                                 self.select_dropdown(driver, ofc_post_city_select_dropdown_path, "")
-                                # time.sleep(random.uniform(0.1, 0.3))  # Wait between 1 and 3 seconds
-                                # time.sleep(random.uniform(0.2, 0.8))  # Wait between 1 and 3 seconds
-                                time.sleep(random.uniform(0.2, 0.7))  # Wait between 1 and 3 seconds
-                                # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
+                                time.sleep(random.uniform(0.2, 0.7))
 
-                            #self.select_dropdown(driver, ofc_post_city_select_dropdown_path, post_city)
-                            #retry logic implemented
                             self.retry(self.select_dropdown, 3, 2, driver, ofc_post_city_select_dropdown_path, post_city)
-                            # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
+
+                            # ✅ Fire JS change event to trigger calendar load
+                            try:
+                                dropdown = driver.find_element(By.XPATH, ofc_post_city_select_dropdown_path)
+                                driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", dropdown)
+                                print("✅ JS change event fired on city dropdown")
+                            except Exception as e:
+                                print("JS event dispatch failed: " + str(e))
+
                             no_slots_avail_path = "//div[not(contains(@style,'none'))]/div[text()='No Slots Available']"
-                            # time.sleep(random.uniform(0.1, 0.3))  # Wait between 1 and 3 seconds
                             self.wait_for_any_element_to_be_visible(driver, ofc_post_city_calendar_date_picker, no_slots_avail_path, self.city_dropdown_wait_time)
-                            time.sleep(random.uniform(0.5, 1))  # Wait between 1 and 3 seconds
-                            # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
-                            if not self.isElementPresent(driver, ofc_post_city_calendar_date_picker) and not self.isElementPresent(driver, group_members_path):
-                                print("Date Input Not Loaded or Found So Maybe OFC Page Navigated to any other page or Something Went Wrong.")
-                                try:
-                                    # Switch to the newly opened tab
-                                    self.safe_switch_window(driver, prefer_index=0)
-                                    
-                                except Exception as expt:
-                                    # print("Exception Occurred while switching window handles: " + str(expt))
-                                    print("switching window handles Exception : " + str(expt))
-                                    return
-
-                                check_for_web = input("It seems like OFC Page is Naviagted to any other page, please navigate it to OFC Page & Hit Enter to Continue the Program: ")
-                                try:
-                                    # Switch to the newly opened tab
-                                    self.safe_switch_window(driver, prefer_index=1)
-
-                                    # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
-
-                                except Exception as expt:
-                                    # print("Exception Occurred while switching window handles: " + str(expt))
-                                    print("switching window handles Exception : " + str(expt))
-                                    return
+                            time.sleep(random.uniform(0.5, 1))
 
                             if self.isElementPresent(driver, ofc_post_city_calendar_date_picker):
                                 for year in self.year_numbers:
@@ -268,11 +292,7 @@ class UsVisaScheduling:
                                         if self.isElementPresent(driver, ofc_post_city_calendar_date_picker_month):
                                             if not self.isElementPresent(driver, ofc_post_city_calendar_date_picker_month + "/option[@value='" + num + "' and @selected]"):
                                                 self.select_dropdown(driver, ofc_post_city_calendar_date_picker_month, num, True)
-                                                # time.sleep(random.uniform(0.1, 0.3))  # Wait between 1 and 3 seconds
-                                                # time.sleep(random.uniform(0.2, 0.5))  # Wait between 1 and 3 seconds
-                                                time.sleep(random.uniform(0.2, 0.4))  # Wait between 1 and 3 seconds
-
-                                                # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
+                                                time.sleep(random.uniform(0.2, 0.4))
 
                                             self.handle_calendar(driver, num, post_city, "first", year)
                                             if str(int(num) + 1) in months:
@@ -282,28 +302,7 @@ class UsVisaScheduling:
                         else:
                             print("First City Dropdown not Found")
                     else:
-                        print("Group Members Label is not present")
-                        try:
-                            # Switch to the newly opened tab
-                            self.safe_switch_window(driver, prefer_index=0)
-                            print(driver.current_url)
-                        except Exception as expt:
-                            # print("Exception Occurred while switching window handles: " + str(expt))
-                            print("switching window handles Exception : " + str(expt))
-                            return
-
-                        check_for_group_members_label = input("It seems like OFC Page is Naviagted to any other page, please navigate it to OFC Page & Hit Enter to Continue the Program: ")
-                        try:
-                            # Switch to the newly opened tab
-                            self.safe_switch_window(driver, prefer_index=1)
-                            print(driver.current_url)
-
-                            # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
-
-                        except Exception as expt:
-                            # print("Exception Occurred while switching window handles: " + str(expt))
-                            print("switching window handles Exception : " + str(expt))
-                            return
+                        print("⚠️ Page never became ready — skipping this iteration")
 
                     counter = counter + 1
 
@@ -455,8 +454,8 @@ class UsVisaScheduling:
         # prefs = {"profile.managed_default_content_settings.images": 2}
         # options.add_experimental_option("prefs", prefs)
         
-        #5if proxy != "":
-          #  chrome_options.add_argument(f'--proxy-server=http://{proxy}')
+        #55if proxy != "":
+            #55chrome_options.add_argument(f'--proxy-server=http://{proxy}')
        
         return chrome_options
 
