@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
+import winsound
 
 class UsVisaScheduling:
     ofc_post_city_list = []
@@ -55,21 +55,27 @@ class UsVisaScheduling:
             # ✅ OFC Page is ready
             if self.isElementPresent(driver, group_members_path):
                 print("✅ OFC Page Ready!")
+                time.sleep(random.uniform(1.0, 2.0))
                 return True
 
-            # 🕐 State 1: Waiting Queue — detected by URL or image-section
-            elif "ofc-schedule" not in current_url or \
+            # 🕐 State 1: Waiting Queue — URL is /en-US/ with image-section
+            elif current_url == "https://www.usvisascheduling.com/en-us/" or \
                 self.isElementPresent(driver, "//div[@id='image-section']"):
-                print(f"⏳ [QUEUE] Waiting room active... URL: {driver.current_url} ({attempt * 10}s elapsed)")
+                print(f"⏳ [QUEUE] Waiting room active... ({attempt * 10}s elapsed)")
                 time.sleep(10)
 
-            # 🤖 State 2: Cloudflare Human Verification
+            # 🤖 State 2: Tick/Checkbox Verification — URL is root URL
             elif "just a moment" in current_title or \
-                "verifying" in current_title or \
-                self.isElementPresent(driver, "//div[contains(text(),'Verifying you are human')]"):
-                print(f"🤖 [CLOUDFLARE] Verifying human... ({attempt * 10}s elapsed)")
-                time.sleep(10)
-
+                self.isElementPresent(driver, "//label[contains(@class,'cb-lb')]"):
+                print(f"🤖 [CLOUDFLARE TURNSTILE] Checkbox verification detected...")
+                checkbox_clicked = self.click_verification_checkbox(driver)
+                if checkbox_clicked:
+                    print("✅ Checkbox clicked! Waiting for redirect...")
+                    time.sleep(5)
+                else:
+                    print("⚠️ Could not auto-click checkbox, waiting 5s...")
+                    time.sleep(5)
+            
             # ❌ State 3: Cloudflare 524 Timeout
             elif "524" in current_title or \
                 self.isElementPresent(driver, "//*[contains(text(),'timeout occurred')]"):
@@ -81,10 +87,47 @@ class UsVisaScheduling:
 
             # ❓ Unknown state
             else:
-                print(f"⚠️ [UNKNOWN] Page not ready... Title: {driver.title} URL: {driver.current_url} ({attempt * 10}s elapsed)")
+                print(f"⚠️ [UNKNOWN] Title: {driver.title} URL: {driver.current_url} ({attempt * 10}s elapsed)")
                 time.sleep(10)
 
         print("❌ Gave up waiting for page to be ready.")
+        return False
+    
+    def click_verification_checkbox(self, driver):
+        checkbox_xpaths = [
+            "//label[contains(@class,'cb-lb')]//input[@type='checkbox']",
+            "//label[contains(@class,'cb-lb')]",
+            "//input[@type='checkbox']",
+            "//iframe[contains(@src,'challenges.cloudflare.com')]",
+        ]
+        
+        # First try direct click on checkbox
+        for xpath in checkbox_xpaths:
+            try:
+                # Try switching to iframe first if cloudflare iframe exists
+                iframes = driver.find_elements(By.XPATH, "//iframe")
+                for iframe in iframes:
+                    try:
+                        driver.switch_to.frame(iframe)
+                        checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
+                        if checkbox.is_displayed():
+                            driver.execute_script("arguments[0].click();", checkbox)
+                            print("✅ Checkbox clicked inside iframe!")
+                            driver.switch_to.default_content()
+                            return True
+                    except:
+                        driver.switch_to.default_content()
+                        continue
+                
+                # Try direct click without iframe
+                element = driver.find_element(By.XPATH, xpath)
+                if element.is_displayed():
+                    driver.execute_script("arguments[0].click();", element)
+                    print(f"✅ Clicked verification element: {xpath}")
+                    return True
+            except:
+                continue
+        
         return False
     
     def ofc_post(self):
@@ -149,10 +192,10 @@ class UsVisaScheduling:
     def us_visa_sch_nav(self):
         try:
 
-            inner_start_time = float(input("Please Enter Start Time of wait between Every Loop like: 1.1 "))
-            inner_end_time = float(input("Please Enter End Time of wait between Every Loop like: 10.9 "))
-            outer_start_time = float(input("Please Enter Start Time of wait After Every Loop like: 1.1 "))
-            outer_end_time = float(input("Please Enter End Time of wait After Every Loop like: 12.9 "))
+            inner_start_time = float(input("Please Enter Start Time of wait between Every Loop like: 1.1 :"))
+            inner_end_time = float(input("Please Enter End Time of wait between Every Loop like: 10.9 :"))
+            outer_start_time = float(input("Please Enter Start Time of wait After Every Loop like: 1.1 :"))
+            outer_end_time = float(input("Please Enter End Time of wait After Every Loop like: 12.9 :"))
 
             # pause_duration = random.uniform(15.1, 45.9)  # Pause for 30 seconds
             # pause_duration = random.uniform(15.1, 120.9)  # Pause for 30 seconds
@@ -175,7 +218,7 @@ class UsVisaScheduling:
             # Define the URL
             url = "https://www.usvisascheduling.com/"
             #url = "https://www.usvisascheduling.com/en-US/ofc-schedule/"
-            #55proxy = input("Please Enter Proxy Like: 5.59.250.12:6710: ")
+            proxy = input("Please Enter Proxy Like: 5.59.250.12:6710: ")
 
             # def get_random_proxy():
             #     return random.choice(proxies)
@@ -185,8 +228,8 @@ class UsVisaScheduling:
             # options = Options()
             # proxy = get_random_proxy()
             # print("Current Proxy: " + str(proxy))
-            # 55 use this line....options = self.getChromeOptions(options, proxy)
-            options = self.getChromeOptions(options, "")
+            options = self.getChromeOptions(options, proxy)
+            #options = self.getChromeOptions(options, "")
             # Initialize Chrome WebDriver with options
             # driver = uc.Chrome(options=options, version_main=144)
             #driver = uc.Chrome(options=options)
@@ -245,11 +288,15 @@ class UsVisaScheduling:
                     current_time = time.time()
                     elapsed_time = current_time - start_time
                     if elapsed_time >= bot_run_interval:
-                        self.select_dropdown(driver, ofc_post_city_select_dropdown_path, "")
+                        #removed the blank dropdown selection during pause
+                        #self.select_dropdown(driver, ofc_post_city_select_dropdown_path, "")
                         #self.retry(self.select_dropdown, 3, 2, driver, ofc_post_city_select_dropdown_path, post_city)
                         # self.clear_browser_cache(driver)
                         print("Pausing for '" + str(pause_duration) + "' Seconds after every '" + str(bot_run_interval_start_time) + "' to '" + str(bot_run_interval_end_time) + "' Minutes...")
-                        time.sleep(pause_duration)  # Pause the bot for in between 15 seconds to 45 seconds
+                        time.sleep(pause_duration)
+                        bot_run_interval = random.uniform(bot_run_interval_start_time * 60, bot_run_interval_end_time * 60)
+                        pause_duration = random.uniform(pause_duration_start_time, pause_duration_end_time)
+                        start_time = time.time()  # Pause the bot for in between 15 seconds to 45 seconds
                         # bot_run_interval = random.randint(8 * 60, 12 * 60)  # 8-12 minutes
                         # bot_run_interval = random.uniform(1 * 60, 8 * 60)  # 8-12 minutes
                         # bot_run_interval = random.uniform(3 * 60, 8 * 60)  # 8-12 minutes
@@ -265,21 +312,71 @@ class UsVisaScheduling:
 
                             if len(self.ofc_post_city_list) == 1:
                                 self.select_dropdown(driver, ofc_post_city_select_dropdown_path, "")
-                                time.sleep(random.uniform(0.2, 0.7))
+                                time.sleep(random.uniform(1.5, 3.0))
 
                             self.retry(self.select_dropdown, 3, 2, driver, ofc_post_city_select_dropdown_path, post_city)
 
-                            # ✅ Fire JS change event to trigger calendar load
+                            #Check this solution for calendar loading.
+                            # ✅ Use ActionChains to simulate real human click on dropdown option
                             try:
-                                dropdown = driver.find_element(By.XPATH, ofc_post_city_select_dropdown_path)
-                                driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", dropdown)
-                                print("✅ JS change event fired on city dropdown")
-                            except Exception as e:
-                                print("JS event dispatch failed: " + str(e))
+                                from selenium.webdriver.common.action_chains import ActionChains
+                                from selenium.webdriver.support.select import Select
 
+                                dropdown = driver.find_element(By.XPATH, ofc_post_city_select_dropdown_path)
+
+                                # Scroll into view
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", dropdown)
+                                time.sleep(random.uniform(0.5, 1.0))
+
+                                # Move mouse to dropdown naturally
+                                action = ActionChains(driver)
+                                action.move_to_element(dropdown)
+                                action.pause(random.uniform(0.3, 0.7))
+                                action.click()
+                                action.perform()
+                                time.sleep(random.uniform(0.3, 0.6))
+
+                                # Now select the option
+                                select = Select(dropdown)
+                                select.select_by_visible_text(post_city)
+                                time.sleep(random.uniform(0.5, 1.0))
+
+                                print("✅ Human-like selection done")
+
+                            except Exception as e:
+                                print("Selection failed: " + str(e))
+                                self.retry(self.select_dropdown, 3, 2, driver, ofc_post_city_select_dropdown_path, post_city)
                             no_slots_avail_path = "//div[not(contains(@style,'none'))]/div[text()='No Slots Available']"
-                            self.wait_for_any_element_to_be_visible(driver, ofc_post_city_calendar_date_picker, no_slots_avail_path, self.city_dropdown_wait_time)
-                            time.sleep(random.uniform(0.5, 1))
+                            # ✅ Retry calendar load up to 3 times
+                            calendar_loaded = False
+                            for cal_attempt in range(3):
+                                self.wait_for_any_element_to_be_visible(driver, ofc_post_city_calendar_date_picker, no_slots_avail_path, 60)
+                                time.sleep(random.uniform(0.5, 1))
+                                
+                                if self.isElementPresent(driver, ofc_post_city_calendar_date_picker):
+                                    print(f"✅ Calendar loaded on attempt {cal_attempt + 1}")
+                                    calendar_loaded = True
+                                    break
+                                elif self.isElementPresent(driver, no_slots_avail_path):
+                                    print(f"❌ No Slots Available on attempt {cal_attempt + 1}")
+                                    calendar_loaded = True
+                                    break
+                                else:
+                                    print(f"⚠️ Calendar not loaded yet, retrying... attempt {cal_attempt + 1}")
+                                    # Re-fire the selection
+                                    try:
+                                        dropdown = driver.find_element(By.XPATH, ofc_post_city_select_dropdown_path)
+                                        option_xpath = f"//select[@id='post_select']/option[text()='{post_city}']"
+                                        option = driver.find_element(By.XPATH, option_xpath)
+                                        driver.execute_script("arguments[0].selected = true;", option)
+                                        driver.execute_script("""
+                                                var el = arguments[0];
+                                                var event = new Event('change', { bubbles: true, cancelable: true });
+                                                el.dispatchEvent(event);
+                                            """, dropdown)
+                                        print(f"🔄 Re-fired selection event attempt {cal_attempt + 1}")
+                                    except Exception as e:
+                                        print(f"Re-fire failed: {str(e)}")
 
                             if self.isElementPresent(driver, ofc_post_city_calendar_date_picker):
                                 for year in self.year_numbers:
@@ -415,8 +512,8 @@ class UsVisaScheduling:
         # For Disabling Notification
         chrome_options.add_argument('--disable-notifications')
         # For Saving Login Session. Remove this when handling this to client
-        chrome_options.add_argument(r"--user-data-dir=F:\chrome_profile")
-        #chrome_options.add_argument(r"--user-data-dir=./chrome_profile")
+        #chrome_options.add_argument(r"--user-data-dir=F:\chrome_profile")
+        chrome_options.add_argument(r"--user-data-dir=./chrome_profile")
         #chrome_options.add_argument(r"--user-data-dir=./visa_profile")
         
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -454,8 +551,8 @@ class UsVisaScheduling:
         # prefs = {"profile.managed_default_content_settings.images": 2}
         # options.add_experimental_option("prefs", prefs)
         
-        #55if proxy != "":
-            #55chrome_options.add_argument(f'--proxy-server=http://{proxy}')
+        if proxy != "":
+            chrome_options.add_argument(f'--proxy-server=http://{proxy}')
        
         return chrome_options
 
@@ -536,6 +633,12 @@ class UsVisaScheduling:
                 date_picker_green_day = f"//div[contains(@class,'ui-datepicker-group-{calendar}')]//tr/td[contains(@class,'greenday')]/a[text()='" + str(i) + "']"
                 if self.isElementPresent(driver, date_picker_green_day):
                     print("Slot Found For Month: ", num)
+                    # ✅ Early alert when green day detected
+                    try:
+                        import winsound
+                        winsound.Beep(1500, 1000)  # shorter beep when green day found
+                    except:
+                        print("🔔 GREEN DAY DETECTED!")
                     self.ClickElement(driver, date_picker_green_day)
                     # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
                     # time.sleep(random.uniform(0.2, 0.5))  # Wait between 1 and 3 seconds
@@ -594,7 +697,8 @@ class UsVisaScheduling:
                                     # time.sleep(random.uniform(0.2, 0.3))  # Wait between 1 and 3 seconds
                                     # self.ClickElementWithJS(driver, submit_btn_not_disabled_path)
                                     # time.sleep(random.uniform(0.3, 0.5))  # Wait between 1 and 3 seconds
-                                    # this is click submit button. self.ClickElementWithJS(driver, submit_btn_not_disabled_path)
+                                    self.ClickElementWithJS(driver, submit_btn_not_disabled_path)
+                                    print("✅ Submit button clicked!")
                                     # time.sleep(random.uniform(0.3, 0.5))  # Wait between 1 and 3 seconds
                                     # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
 
@@ -615,6 +719,11 @@ class UsVisaScheduling:
                                         print("Slot Date: " + str(slot_date))
                                         print("Slot Time: " + str(slot_time))
                                         print("Slot Allocation: " + allocation)
+                                        try:
+                                            import winsound
+                                            winsound.Beep(1000, 3000)  # beep at 1000Hz for 3 seconds
+                                        except:
+                                            print("🔔 SLOT FOUND ALERT!")
 
                                         waitforinput = input("Clicked on Submit Button Successfully, OFC Page Navigates to Next Page Successfully. Do you want continue the program ? Yes/No.")
                                         # driver.execute_script("window.alert = function() {};")  # Override alert to prevent any alert popup
