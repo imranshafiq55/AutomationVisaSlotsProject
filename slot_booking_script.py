@@ -65,16 +65,36 @@ class UsVisaScheduling:
                 time.sleep(10)
 
             # 🤖 State 2: Tick/Checkbox Verification — URL is root URL
+            # 🤖 State 2: Cloudflare Turnstile Checkbox Verification
             elif "just a moment" in current_title or \
                 self.isElementPresent(driver, "//label[contains(@class,'cb-lb')]"):
-                print(f"🤖 [CLOUDFLARE TURNSTILE] Checkbox verification detected...")
-                checkbox_clicked = self.click_verification_checkbox(driver)
-                if checkbox_clicked:
-                    print("✅ Checkbox clicked! Waiting for redirect...")
-                    time.sleep(5)
-                else:
-                    print("⚠️ Could not auto-click checkbox, waiting 5s...")
-                    time.sleep(5)
+                print(f"🤖 [CLOUDFLARE TURNSTILE] Checkbox verification detected!")
+                print(f"⚠️ PLEASE CLICK THE TICK/CHECKBOX MANUALLY IN CHROME!")
+                
+                # 🔔 Loud beep alert
+                try:
+                    for _ in range(5):
+                        winsound.Beep(1000, 500)
+                        time.sleep(0.2)
+                except:
+                    pass
+                
+                # Wait for human to solve — check every 3 seconds
+                solved = False
+                wait_count = 0
+                while not solved and wait_count < 40:
+                    wait_count += 1
+                    time.sleep(3)
+                    current_title_check = driver.title.lower()
+                    if "just a moment" not in current_title_check:
+                        print("✅ Cloudflare challenge solved! Resuming bot...")
+                        solved = True
+                        time.sleep(2)
+                    else:
+                        print(f"⏳ Waiting for you to solve captcha... ({wait_count * 3}s elapsed)")
+                
+                if not solved:
+                    print("❌ Captcha not solved in time, continuing anyway...")
             
             # ❌ State 3: Cloudflare 524 Timeout
             elif "524" in current_title or \
@@ -84,7 +104,53 @@ class UsVisaScheduling:
                 print("🔄 Refreshing page after 524...")
                 driver.refresh()
                 time.sleep(5)
-
+            
+            # 🚫 IP Blocked by Cloudflare
+            elif "attention required" in current_title.lower() or \
+                "you have been blocked" in driver.page_source.lower():
+                print(f"🚫 [IP BLOCKED] Your IP has been blocked by Cloudflare!")
+                print(f"🚫 Please restart your router to get a new IP then press Enter...")
+                try:
+                    for _ in range(10):
+                        winsound.Beep(500, 1000)
+                        time.sleep(0.5)
+                except:
+                    pass
+                input("Press Enter after restarting router and getting new IP...")
+                driver.get("https://www.usvisascheduling.com/en-US/ofc-schedule/")
+                time.sleep(10)
+             
+            # 🔐 Login redirect / Session expired
+            
+            elif "login" in current_url or \
+                "loginCallback" in current_url or \
+                "signin" in current_url or \
+                "account" in current_url or \
+                not self.isElementPresent(driver, "//a[contains(@href,'logout') or contains(@href,'signout')]") and \
+                "ofc-schedule" not in current_url and \
+                "usvisascheduling.com" in current_url:
+                print(f"🔐 [SESSION EXPIRED] Account logged out detected!")
+                print(f"🔐 Current URL: {driver.current_url}")
+                print(f"⚠️ PLEASE LOG IN AGAIN IN CHROME!")
+                
+                # 🔔 Loud beep alert
+                try:
+                    for _ in range(7):
+                        winsound.Beep(800, 600)
+                        time.sleep(0.3)
+                except:
+                    pass
+                
+                input("Please log in and navigate back to OFC page, then press Enter to continue...")
+                time.sleep(3)
+                
+                # Navigate back to OFC page after login
+                try:
+                    driver.get("https://www.usvisascheduling.com/en-US/ofc-schedule/")
+                    time.sleep(5)
+                    print("✅ Navigated back to OFC page after login!")
+                except Exception as e:
+                    print(f"Navigation failed: {str(e)}")
             # ❓ Unknown state
             else:
                 print(f"⚠️ [UNKNOWN] Title: {driver.title} URL: {driver.current_url} ({attempt * 10}s elapsed)")
@@ -130,6 +196,133 @@ class UsVisaScheduling:
         
         return False
     
+    def recover_from_403(self, driver):
+        """
+        Recovers from Cloudflare 403 by navigating away and back
+        to re-establish trust, simulating human behavior.
+        """
+        try:
+            print("🔄 Starting 403 recovery...")
+
+            # Step 1: Navigate to home page first
+            print("   → Navigating to home page...")
+            driver.get("https://www.usvisascheduling.com/en-US/")
+            time.sleep(random.uniform(3.0, 5.0))
+
+            # Step 2: Wait for home page or queue
+            attempt = 0
+            home_cf_beeped = False  # only beep once
+            while attempt < 12:  # max 2 minutes
+                attempt += 1
+                current_url = driver.current_url.lower()
+                current_title = driver.title.lower()
+
+                if "just a moment" in current_title:
+                    # ✅ Beep alert for human to solve
+                    if not home_cf_beeped:
+                        print(f"   → 🤖 Cloudflare challenge on home page!")
+                        print(f"   → ⚠️ PLEASE CLICK THE TICK IN CHROME NOW!")
+                        try:
+                            for _ in range(5):
+                                winsound.Beep(1000, 500)
+                                time.sleep(0.2)
+                        except:
+                            pass
+                        home_cf_beeped = True
+                    else:
+                        print(f"   → ⏳ Waiting for tick to be solved... ({attempt * 10}s)")
+                    time.sleep(10)
+
+                elif self.isElementPresent(driver, "//div[@id='image-section']") or \
+                    current_url == "https://www.usvisascheduling.com/en-us/":
+                    print(f"   → Queue page detected... waiting ({attempt * 10}s)")
+                    time.sleep(10)
+                else:
+                    print("   → Home page loaded!")
+                    break
+
+            # Step 3: Simulate human scrolling on home page
+            try:
+                from selenium.webdriver.common.action_chains import ActionChains
+                driver.execute_script("window.scrollTo(0, 300);")
+                time.sleep(random.uniform(1.0, 2.0))
+                driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(random.uniform(0.5, 1.0))
+            except:
+                pass
+
+            # Step 4: Navigate back to OFC page
+            print("   → Navigating back to OFC page...")
+            driver.get("https://www.usvisascheduling.com/en-US/ofc-schedule/")
+            time.sleep(random.uniform(3.0, 5.0))
+
+            # Step 5: Wait for OFC page to fully load
+            attempt = 0
+            ofc_cf_beeped = False  # only beep once
+            group_members_path = "//h2[text()='Group Members']"
+            while attempt < 18:  # max 3 minutes
+                attempt += 1
+                current_url = driver.current_url.lower()
+                current_title = driver.title.lower()
+
+                if self.isElementPresent(driver, group_members_path):
+                    print("   → ✅ OFC page loaded successfully!")
+                    break
+
+                elif "just a moment" in current_title:
+                    # ✅ Beep alert for human to solve on OFC page
+                    if not ofc_cf_beeped:
+                        print(f"   → 🤖 Cloudflare challenge on OFC page!")
+                        print(f"   → ⚠️ PLEASE CLICK THE TICK IN CHROME NOW!")
+                        try:
+                            for _ in range(5):
+                                winsound.Beep(1500, 500)
+                                time.sleep(0.2)
+                        except:
+                            pass
+                        ofc_cf_beeped = True
+                    else:
+                        print(f"   → ⏳ Waiting for tick solution... ({attempt * 10}s)")
+                    time.sleep(10)
+
+                elif self.isElementPresent(driver, "//div[@id='image-section']"):
+                    print(f"   → Queue page... waiting ({attempt * 10}s)")
+                    time.sleep(10)
+
+                elif "524" in current_title:
+                    print(f"   → 524 error... waiting 15s")
+                    time.sleep(15)
+                    driver.refresh()
+                    time.sleep(5)
+
+                else:
+                    print(f"   → Waiting for OFC page... ({attempt * 10}s) Title: {driver.title}")
+                    time.sleep(10)
+
+            # Step 6: Simulate human behavior on OFC page
+            try:
+                from selenium.webdriver.common.action_chains import ActionChains
+                action = ActionChains(driver)
+                body = driver.find_element(By.TAG_NAME, 'body')
+                action.move_to_element_with_offset(body, random.randint(100, 400), random.randint(100, 300))
+                action.pause(random.uniform(0.5, 1.0))
+                action.move_to_element_with_offset(body, random.randint(200, 500), random.randint(200, 400))
+                action.pause(random.uniform(0.3, 0.7))
+                action.perform()
+                driver.execute_script("window.scrollTo(0, 200);")
+                time.sleep(random.uniform(1.0, 2.0))
+                driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(random.uniform(1.0, 2.0))
+            except:
+                pass
+
+            print("✅ 403 Recovery complete! Resuming bot...")
+            time.sleep(random.uniform(2.0, 4.0))
+
+        except Exception as e:
+            print(f"❌ Recovery failed: {str(e)}")
+            time.sleep(10)
+        
     def ofc_post(self):
         print("0: CHENNAI VAC")
         print("1: HYDERABAD VAC")
@@ -229,7 +422,7 @@ class UsVisaScheduling:
             # proxy = get_random_proxy()
             # print("Current Proxy: " + str(proxy))
             options = self.getChromeOptions(options, proxy)
-            #options = self.getChromeOptions(options, "")
+           #options = self.getChromeOptions(options, "")
             # Initialize Chrome WebDriver with options
             # driver = uc.Chrome(options=options, version_main=144)
             #driver = uc.Chrome(options=options)
@@ -266,6 +459,25 @@ class UsVisaScheduling:
             print("Slot finding start")
             while slot_not_found:
                 print("Loop in")
+                
+                # ✅ Check session still active
+                try:
+                    current_url = driver.current_url.lower()
+                    if "login" in current_url or "signin" in current_url:
+                        print("🔐 [SESSION CHECK] Account logged out!")
+                        print("⚠️ PLEASE LOG IN AGAIN IN CHROME!")
+                        try:
+                            for _ in range(7):
+                                winsound.Beep(800, 600)
+                                time.sleep(0.3)
+                        except:
+                            pass
+                        input("Please log in and press Enter to continue...")
+                        driver.get("https://www.usvisascheduling.com/en-US/ofc-schedule/")
+                        time.sleep(5)
+                except:
+                    pass
+                
                 for post_city in self.ofc_post_city_list:
                     print("Counter: " + str(counter))
 
@@ -340,8 +552,19 @@ class UsVisaScheduling:
                                 select = Select(dropdown)
                                 select.select_by_visible_text(post_city)
                                 time.sleep(random.uniform(0.5, 1.0))
+                                
+                                try:
+                                    alert = driver.switch_to.alert
+                                    alert_text = alert.text
+                                    print(f"⚠️ Alert detected: {alert_text}")
+                                    alert.accept()
+                                    print("✅ Alert dismissed, continuing...")
+                                    time.sleep(2)
+                                except:
+                                    pass  # no alert, continue normally
 
                                 print("✅ Human-like selection done")
+                                
 
                             except Exception as e:
                                 print("Selection failed: " + str(e))
@@ -362,21 +585,27 @@ class UsVisaScheduling:
                                     calendar_loaded = True
                                     break
                                 else:
-                                    print(f"⚠️ Calendar not loaded yet, retrying... attempt {cal_attempt + 1}")
-                                    # Re-fire the selection
+                                    print(f"⚠️ Calendar not loaded yet on attempt {cal_attempt + 1} — recovering from 403...")
+                                    self.recover_from_403(driver)
+                                    # Re-select city after recovery
                                     try:
+                                        from selenium.webdriver.common.action_chains import ActionChains
+                                        from selenium.webdriver.support.select import Select
                                         dropdown = driver.find_element(By.XPATH, ofc_post_city_select_dropdown_path)
-                                        option_xpath = f"//select[@id='post_select']/option[text()='{post_city}']"
-                                        option = driver.find_element(By.XPATH, option_xpath)
-                                        driver.execute_script("arguments[0].selected = true;", option)
-                                        driver.execute_script("""
-                                                var el = arguments[0];
-                                                var event = new Event('change', { bubbles: true, cancelable: true });
-                                                el.dispatchEvent(event);
-                                            """, dropdown)
-                                        print(f"🔄 Re-fired selection event attempt {cal_attempt + 1}")
+                                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", dropdown)
+                                        time.sleep(random.uniform(1.0, 2.0))
+                                        action = ActionChains(driver)
+                                        action.move_to_element(dropdown)
+                                        action.pause(random.uniform(0.5, 1.0))
+                                        action.click()
+                                        action.perform()
+                                        time.sleep(random.uniform(0.5, 1.0))
+                                        select = Select(dropdown)
+                                        select.select_by_visible_text(post_city)
+                                        time.sleep(random.uniform(2.0, 4.0))
+                                        print(f"🔄 Re-selected city after 403 recovery attempt {cal_attempt + 1}")
                                     except Exception as e:
-                                        print(f"Re-fire failed: {str(e)}")
+                                        print(f"Re-selection after recovery failed: {str(e)}")
 
                             if self.isElementPresent(driver, ofc_post_city_calendar_date_picker):
                                 for year in self.year_numbers:
@@ -512,8 +741,8 @@ class UsVisaScheduling:
         # For Disabling Notification
         chrome_options.add_argument('--disable-notifications')
         # For Saving Login Session. Remove this when handling this to client
-        #chrome_options.add_argument(r"--user-data-dir=F:\chrome_profile")
-        chrome_options.add_argument(r"--user-data-dir=./chrome_profile")
+       #chrome_options.add_argument(r"--user-data-dir=F:\chrome_profile")
+        #chrome_options.add_argument(r"--user-data-dir=./chrome_profile")
         #chrome_options.add_argument(r"--user-data-dir=./visa_profile")
         
         chrome_options.add_argument("--disable-dev-shm-usage")
